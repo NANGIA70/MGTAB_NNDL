@@ -25,8 +25,30 @@ if os.path.exists(CHECKPOINT_FILE):
         sum_embeds, tweet_counts, processed = data.values()
         print(f"Resumed at {processed} tweets")
 
-USER_JSON    = os.path.join(DATA_DIR, "user.json")
-users_df = pd.read_json(USER_JSON, lines=True)
+# load users
+DATA_DIR = Path(DATA_DIR)
+# make sure the data directory exists
+if not DATA_DIR.exists():
+    raise FileNotFoundError(f"Data directory {DATA_DIR} does not exist.")
+
+def load_json_records(fname):
+    """Load a JSON file of array- or line- delimited records."""
+    path = DATA_DIR / fname
+    with open(path, 'r', encoding='utf-8') as f:
+        # if the file is a single large JSON array:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            # fallback: one JSON object per line
+            f.seek(0)
+            data = [json.loads(line) for line in f]
+    return data
+
+print("Loading user data…")
+user_dicts = load_json_records('user.json')
+
+print(f"Loaded {len(user_dicts):,} users from {DATA_DIR / 'user.json'}. Now coverting to DataFrame…")
+users_df = pd.DataFrame(user_dicts)
 
 ordered_uids = users_df['id'].astype(str).tolist()
 
