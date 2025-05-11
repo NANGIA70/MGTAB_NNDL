@@ -1,0 +1,113 @@
+import os, glob, pickle, torch, ijson
+from sentence_transformers import SentenceTransformer
+from collections import defaultdict
+from tqdm.auto import tqdm
+import pandas as pd
+import json
+
+# ─── NEW: point at the mountpoint ──────────────────────────────
+DATA_DIR = "/mnt/gcs/TwiBot-22"      # <-- GCS is now mounted here
+CHECKPOINT_FILE = "tweet_feats_checkpoint.pkl"
+CHECKPOINT_INTERVAL  = 1_000_000        # save every 1M tweets
+BATCH_SIZE      = 128
+
+tweet_files = sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json")))
+sum_embeds    = defaultdict(lambda: torch.zeros(768))
+tweet_counts  = defaultdict(int)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = SentenceTransformer("LaBSE").to(device).eval()  # or 'cpu'
+processed     = 0
+
+# (optional) resume checkpoint
+if os.path.exists(CHECKPOINT_FILE):
+    with open(CHECKPOINT_FILE,'rb') as f:
+        data = pickle.load(f)
+        sum_embeds, tweet_counts, processed = data.values()
+        print(f"Resumed at {processed} tweets")
+
+USER_JSON    = os.path.join(DATA_DIR, "user.json")
+users_df = pd.read_json(USER_JSON, lines=True)
+
+ordered_uids = users_df['id'].astype(str).tolist()
+
+batch_uids, batch_texts = [], []
+def flush_batch():
+    """Encode batch_texts, accumulate into sum_embeds/tweet_counts,
+       advance processed counter, and checkpoint if needed."""
+    global processed
+    if not batch_texts:
+        return
+
+    # 2a) Batch-encode
+    embs = model.encode(
+        batch_texts,
+        convert_to_tensor=True,
+        batch_size=BATCH_SIZE,
+        show_progress_bar=False
+    )
+    # 2b) Accumulate
+    for uid, emb in zip(batch_uids, embs):
+        sum_embeds[uid]   += emb
+        tweet_counts[uid] += 1
+
+    # 2c) Update processed count & clear buffers
+    processed += len(batch_texts)
+    batch_uids.clear()
+    batch_texts.clear()
+
+    # 2d) Checkpoint?
+    if processed and processed % CHECKPOINT_INTERVAL < BATCH_SIZE:
+        with open(CHECKPOINT_FILE, 'wb') as f:
+            pickle.dump({
+                'sum_embeds':   sum_embeds,
+                'tweet_counts': tweet_counts,
+                'processed':    processed
+            }, f)
+        print(f"Checkpoint saved at {processed} tweets.")
+
+# ─── 3) Stream & process with tqdm ───────────────────────────────────────────
+for fn in tweet_files:
+    with open(fn, 'r') as f:
+        # ijson.items streams each JSON object in the top-level array
+        for tw in tqdm(ijson.items(f, 'item'),
+                       desc=f"Streaming {os.path.basename(fn)}",
+                       leave=False):
+            text = tw.get('text','').strip()
+            if not text:
+                continue
+
+            batch_uids.append(tw['author_id'])
+            batch_texts.append(text)
+
+            if len(batch_texts) >= BATCH_SIZE:
+                flush_batch()
+
+flush_batch()
+
+with open(CHECKPOINT_FILE, 'wb') as f:
+    pickle.dump({
+        'sum_embeds':   sum_embeds,
+        'tweet_counts': tweet_counts,
+        'processed':    processed
+    }, f)
+print(f"✅ Done! Total tweets processed: {processed}")
+
+user_tweet_feats = []
+for uid in ordered_uids:
+    cnt = tweet_counts.get(uid, 0)
+    if cnt > 0:
+        avg = sum_embeds[uid] / cnt
+    else:
+        avg = torch.zeros(768)     # no tweets → zero vector
+    user_tweet_feats.append(avg)
+
+# shape [num_users, 768]
+tweets_tensor = torch.stack(user_tweet_feats, dim=0)
+
+# sanity check
+print("Tweet‐feature tensor size:", tweets_tensor.shape)
+# should be (len(ordered_uids), 768)
+
+torch.save(tweets_tensor, 'tweets_tensor.pt')
+
+
