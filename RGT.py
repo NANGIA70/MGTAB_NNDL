@@ -131,8 +131,13 @@ def main(seed):
             max_precision = precision
             max_recall = recall
 
+            print('Saving model...')
+            torch.save(model.state_dict(), 'RGT_{}_seed_{}.pkl'.format(args.task, seed))
+            print('Model saved!')
+
     print("Test set results:",
           "epoch= {:}".format(max_epoch),
+          "loss= {:.4f}".format(loss_test.item()),
           "test_accuracy= {:.4f}".format(max_acc),
           "precision= {:.4f}".format(max_precision),
           "recall= {:.4f}".format(max_recall),

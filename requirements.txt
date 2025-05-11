@@ -1,0 +1,24 @@
+# Core packages
+torch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
+
+# PyTorch Geometric (auto-installs compatible torch-scatter, etc.)
+torch-geometric==2.4.0
+
+# Machine learning utils
+scikit-learn==1.0.2
+numpy==1.23.5
+
+# Model training
+pytorch-lightning==1.9.5
+
+# pip install torch==1.13.1
+# pip install torch-scatter -f https://data.pyg.org/whl/torch-1.13.0+cpu.html
+# pip install torch-sparse -f https://data.pyg.org/whl/torch-1.13.0+cpu.html
+# pip install torch-cluster -f https://data.pyg.org/whl/torch-1.13.0+cpu.html
+# pip install torch-spline-conv -f https://data.pyg.org/whl/torch-1.13.0+cpu.html
+# pip install torch-geometric
+# pip install scikit-learn==1.0.2 pytorch-lightning==1.9.5
+
+
