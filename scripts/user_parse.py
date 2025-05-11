@@ -85,6 +85,7 @@ users_df = users_df.drop(columns=['description', 'name', 'username', 'location']
 users_df = users_df.drop(columns=['withheld', 'url.urls', 'description.urls', 'description.mentions', 'description.hashtags', 'description.cashtags'], errors="ignore")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
 model = SentenceTransformer("LaBSE").to(device).eval()
 
 batch_size = 256
