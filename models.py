@@ -214,66 +214,40 @@ class HGT(nn.Module):
 
         return x
 
-
 class RGT(nn.Module):
     def __init__(self, args):
         super(RGT, self).__init__()
 
-        # text 
         self.linear1 = nn.Linear(args.features_num, args.hidden_dimension)
-        self.relu    = nn.LeakyReLU()
-        self.drop    = nn.Dropout(args.dropout)
+        self.RGT_layer1 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension,
+                                   trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=args.dropout)
+        # self.RGT_layer2 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=args.dropout)
 
-        # image branch
-        resnet = models.resnet50(pretrained=True)
-        self.image_encoder = nn.Sequential(*list(resnet.children())[:-1])
-        for p in self.image_encoder.parameters():
-            p.requires_grad = False
-        self.img_proj = nn.Sequential(nn.Flatten(), nn.Linear(2048, args.hidden_dimension), nn.LeakyReLU())
+        self.out1 = torch.nn.Linear(args.hidden_dimension, args.out_channel)
+        self.out2 = torch.nn.Linear(args.out_channel, args.out_dim)
 
-        # two relational graph layers
-        self.RGT1 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=args.dropout)
-        self.RGT2 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=args.dropout)
-        
-        self.out1 = nn.Linear(args.hidden_dimension, args.out_channel)
-        self.out2 = nn.Linear(args.out_channel, args.out_dim)
+        self.drop = nn.Dropout(args.dropout)
+        self.CELoss = nn.CrossEntropyLoss()
+        self.ReLU = nn.LeakyReLU()
 
-        self._init_weights()
+        self.init_weight()
 
-    def _init_weights(self):
+    def init_weight(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.kaiming_uniform_(m.weight)
+                torch.nn.init.kaiming_uniform_(m.weight.data)
                 if m.bias is not None:
-                    m.bias.data.zero_()
+                    m.bias.data.fill_(0.0)
 
-    def forward(self, features, edge_index, edge_type, img=None):
-        # text branch
-        txt = self.relu(self.linear1(features))
-        txt = self.drop(txt)
+    def forward(self, features, edge_index, edge_type):
 
-        # image branch (zero‐vector if img is all zeros)
-        if img is not None:
-            with torch.no_grad():
-                v = self.image_encoder(img)
-            v = v.view(v.size(0), -1)    
-            img_feats = self.img_proj(v)  
-        else:
-            img_feats = torch.zeros_like(txt)
+        user_features = self.drop(self.ReLU(self.linear1(features)))
+        user_features = self.ReLU(self.RGT_layer1(user_features, edge_index, edge_type))
+        user_features = self.ReLU(self.RGT_layer1(user_features, edge_index, edge_type))
+        user_features = self.drop(self.ReLU(self.out1(user_features)))
+        x = self.out2(user_features)
 
-        # 3) fuse
-        h = txt + img_feats
-
-        # 4) graph layers
-        h = self.relu(self.RGT1(h, edge_index, edge_type))
-        h = self.relu(self.RGT2(h, edge_index, edge_type))
-
-        # 5) head
-        h = self.drop(self.relu(self.out1(h)))
-        x = self.out2(h)
         return x
-
-
 
 class SHGN(nn.Module):
     def __init__(self, args):
@@ -308,3 +282,44 @@ class SHGN(nn.Module):
         user_features = self.drop(self.ReLU(self.out1(user_features)))
         x = self.out2(user_features)
         return x
+    
+class RGT_multimodal(nn.Module):
+    def __init__(self, args):
+        super(RGT_multimodal, self).__init__()
+        self.dropout = args.dropout
+        # Text branch projection
+        self.text_proj = nn.Sequential(nn.Linear(args.features_num, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
+        # Image branch projection (CLIP embeddings)
+        self.img_proj = nn.Sequential(nn.Linear(args.img_feat_dim, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
+        # Two relational graph layers
+        self.RGT1 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
+        self.RGT2 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
+        # Classification head
+        self.head = nn.Sequential(nn.Linear(args.hidden_dimension, args.out_channel), nn.LeakyReLU(), nn.Dropout(self.dropout), nn.Linear(args.out_channel, args.out_dim))
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_uniform_(m.weight)
+                if m.bias is not None:
+                    m.bias.data.zero_()
+
+    def forward(self, features, edge_index, edge_type, img=None):
+        # 1) Text branch
+        txt_feats = self.text_proj(features)
+        # 2) Image branch (use zeros if no image)
+        if img is not None:
+            img_feats = self.img_proj(img)
+        else:
+            img_feats = torch.zeros_like(txt_feats)
+        # 3) Fuse
+        h = txt_feats + img_feats
+        # 4) Graph layers
+        h = self.RGT1(h, edge_index, edge_type)
+        h = torch.relu(h)
+        h = self.RGT2(h, edge_index, edge_type)
+        h = torch.relu(h)
+        # 5) Head
+        out = self.head(h)
+        return out
