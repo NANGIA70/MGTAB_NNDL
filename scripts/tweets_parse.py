@@ -18,10 +18,10 @@ sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
 tweet_counts  = defaultdict(int)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
-model = SentenceTransformer("LaBSE").to(device).eval()  # or 'cpu'
-print("Model device:", next(model.model.parameters()).device)
+model = SentenceTransformer("msmarco-distilbert-dot-v5").to(device).eval()  # or 'cpu'
+
 print("CUDA available:", torch.cuda.is_available())
-print("CUDA devices:", torch.cuda.device_count(), torch.cuda.get_device_name(0))
+print("Model device:", next(model.parameters()).device)
 processed     = 0
 
 # (optional) resume checkpoint
@@ -46,7 +46,7 @@ _  = model.encode(
     sample_texts,
     convert_to_tensor=True,
     batch_size=BATCH_SIZE,
-    device=device
+    device=str(device)
 )
 t1 = time.time()
 print(f"Throughput: {1000/(t1-t0):.1f} tweets/sec")
@@ -92,7 +92,7 @@ def flush_batch():
         convert_to_tensor=True,
         batch_size=BATCH_SIZE,
         show_progress_bar=False,
-        device=device,
+        device=str(device),
     )
     # 2b) Accumulate
     for uid, emb in zip(batch_uids, embs):
