@@ -39,6 +39,7 @@ uid2idx = {u:i for i,u in enumerate(uids)}
 num_users = len(uids)
 
 # ─── MODEL ─────────────────────────────────────────────────────────────────
+print("Using device:", DEVICE)
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", use_fast=True)
 model     = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")\
                      .vision_model.to(DEVICE).eval()
@@ -57,6 +58,7 @@ def fetch(uid):
         return uid, None
 
 # ─── STREAM & EMBED ────────────────────────────────────────────────────────
+print("Processing images…")
 batch_imgs, batch_idxs = [], []
 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
     for uid,img in tqdm(exe.map(fetch, uids), total=num_users, desc="Profile"):
