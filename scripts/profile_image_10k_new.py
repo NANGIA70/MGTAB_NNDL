@@ -18,25 +18,57 @@ DEVICE         = torch.device('cuda' if torch.cuda.is_available()
                             else 'mps'  if torch.backends.mps.is_available()
                             else 'cpu')
 
-# ─── LOAD & FILTER USERS ────────────────────────────────────────────────────
+# # ─── LOAD & FILTER USERS ────────────────────────────────────────────────────
+# DATA_DIR = Path(DATA_DIR)
+# def load_json_records(fname):
+#     p = DATA_DIR/fname
+#     with open(p,'r',encoding='utf-8') as f:
+#         try: d=json.load(f)
+#         except: 
+#             f.seek(0)
+#             d=[json.loads(l) for l in f]
+#     return d
+
+# print("Loading user data…")
+# users = load_json_records("user.json")
+# uids  = pd.read_csv(SAMPLE_UID_CSV,dtype=str)['id'].tolist()
+# uids  = list(filter(lambda u: str(u) in set(uids), [u['id'] for u in users]))
+# urls  = {str(u['id']):u.get('profile_image_url','') for u in users}
+
+# uid2idx = {u:i for i,u in enumerate(uids)}
+# num_users = len(uids)
+
 DATA_DIR = Path(DATA_DIR)
+if not DATA_DIR.exists():
+    raise FileNotFoundError(f"Data directory {DATA_DIR} does not exist.")
+
 def load_json_records(fname):
-    p = DATA_DIR/fname
-    with open(p,'r',encoding='utf-8') as f:
-        try: d=json.load(f)
-        except: 
+    """Load a JSON file of array- or line- delimited records."""
+    path = DATA_DIR / fname
+    with open(path, 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
             f.seek(0)
-            d=[json.loads(l) for l in f]
-    return d
+            data = [json.loads(line) for line in f]
+    return data
 
 print("Loading user data…")
-users = load_json_records("user.json")
-uids  = pd.read_csv(SAMPLE_UID_CSV,dtype=str)['id'].tolist()
-uids  = list(filter(lambda u: str(u) in set(uids), [u['id'] for u in users]))
-urls  = {str(u['id']):u.get('profile_image_url','') for u in users}
+user_dicts = load_json_records('user.json')
+print(f"Loaded {len(user_dicts):,} users. Filtering to sample of 10k…")
 
-uid2idx = {u:i for i,u in enumerate(uids)}
+# ─── FILTER TO SAMPLE UIDS ───────────────────────────────────────────────────
+sample_df = pd.read_csv(SAMPLE_UID_CSV, dtype=str)
+sample_uids = set(sample_df['id'].tolist())
+filtered = [u for u in user_dicts if str(u.get('id')) in sample_uids]
+users_df = pd.DataFrame(filtered)
+print(f"Filtered down to {len(users_df):,} users.")
+
+# ─── EXTRACT IDS & PROFILE URLS ──────────────────────────────────────────────
+uids = users_df['id'].astype(str).tolist()
+urls = users_df['profile_image_url'].fillna('').tolist()
 num_users = len(uids)
+uid2idx = {uid: i for i, uid in enumerate(uids)}
 
 # ─── MODEL ─────────────────────────────────────────────────────────────────
 print("Using device:", DEVICE)
