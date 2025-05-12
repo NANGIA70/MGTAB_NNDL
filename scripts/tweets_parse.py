@@ -10,7 +10,7 @@ import json
 DATA_DIR = "/mnt/gcs/TwiBot-22"      # <-- GCS is now mounted here
 CHECKPOINT_FILE = "tweet_feats_checkpoint.pkl"
 CHECKPOINT_INTERVAL  = 1_000_000        # save every 1M tweets
-BATCH_SIZE      = 128
+BATCH_SIZE      = 512
 
 tweet_files = sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json")))
 sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
@@ -26,6 +26,26 @@ if os.path.exists(CHECKPOINT_FILE):
         data = pickle.load(f)
         sum_embeds, tweet_counts, processed = data.values()
         print(f"Resumed at {processed} tweets")
+
+# ─── 1) Sample ─────────────────────────────────────────────
+sample_texts = []
+with open(tweet_files[0],'r') as f:
+    for tw in ijson.items(f,'item'):
+        txt = tw.get('text','').strip()
+        if txt:
+            sample_texts.append(txt)
+        if len(sample_texts)==1000:
+            break
+
+t0 = time.time()
+_  = model.encode(
+    sample_texts,
+    convert_to_tensor=True,
+    batch_size=BATCH_SIZE,
+    device=device
+)
+t1 = time.time()
+print(f"Throughput: {1000/(t1-t0):.1f} tweets/sec")
 
 # load users
 DATA_DIR = Path(DATA_DIR)
@@ -67,7 +87,8 @@ def flush_batch():
         batch_texts,
         convert_to_tensor=True,
         batch_size=BATCH_SIZE,
-        show_progress_bar=False
+        show_progress_bar=False,
+        device=device,
     )
     # 2b) Accumulate
     for uid, emb in zip(batch_uids, embs):
