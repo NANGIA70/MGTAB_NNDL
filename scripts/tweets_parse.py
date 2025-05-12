@@ -128,6 +128,9 @@ def flush_batch():
             }, f)
         print(f"Checkpoint saved at {processed} tweets.")
 
+MAX_PER_USER = 20
+seen_per_user = {}
+
 # ─── 3) Stream & process with tqdm ───────────────────────────────────────────
 for fn in tweet_files:
     with open(fn, 'r') as f:
@@ -138,6 +141,12 @@ for fn in tweet_files:
             text = tw.get('text','').strip()
             if not text:
                 continue
+
+            # enforce per-user cap
+            c = seen_per_user.get(uid, 0)
+            if c >= MAX_PER_USER:
+                continue
+            seen_per_user[uid] = c + 1
 
             batch_uids.append(tw['author_id'])
             batch_texts.append(text)
@@ -153,7 +162,7 @@ with open(CHECKPOINT_FILE, 'wb') as f:
         'tweet_counts': tweet_counts,
         'processed':    processed
     }, f)
-print(f"✅ Done! Total tweets processed: {processed}")
+print(f"Done! Total tweets processed: {processed}")
 
 user_tweet_feats = []
 for uid in ordered_uids:
