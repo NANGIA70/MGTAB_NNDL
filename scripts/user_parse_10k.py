@@ -2,6 +2,7 @@
 import os, json, pandas as pd, torch, numpy as np
 from pathlib import Path
 from sklearn.decomposition import PCA
+from sentence_transformers import SentenceTransformer
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 DATA_DIR     = "/mnt/gcs/TwiBot-22"   # directory containing user.json
@@ -66,8 +67,13 @@ users_df['text_combo'] = (
 )
 users_df.drop(columns=['description','name','username','location'], inplace=True, errors='ignore')
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model = torch.hub.load('sentence-transformers', 'LaBSE').to(device).eval()  # adjust import
+# ─── MODEL SETUP ────────────────────────────────────────────────────────────
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+model = SentenceTransformer("LaBSE").to(device).eval()
+if device.type == 'cuda':
+    torch.backends.cudnn.benchmark = True
+    
 batch_size = 256
 embs = []
 for i in range(0, len(users_df), batch_size):
