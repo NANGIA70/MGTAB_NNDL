@@ -12,8 +12,8 @@ DATA_DIR               = "/mnt/gcs/TwiBot-22"            # where tweet_*.json li
 USER_JSON              = os.path.join(DATA_DIR, "user.json")
 IMAGE_CHECKPOINT       = "image_feats_checkpoint.pt"
 IMAGE_CHECKPOINT_INTVL = 100_000                         # checkpoint every 100k images
-MAX_IMAGES_PER_USER    = 20                              # cap per user
-IMAGE_BATCH_SIZE       = 256 
+MAX_IMAGES_PER_USER    = 10                              # cap per user
+IMAGE_BATCH_SIZE       = 512 
 DEVICE                 = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ─── SETUP ─────────────────────────────────────────────────────────────────
