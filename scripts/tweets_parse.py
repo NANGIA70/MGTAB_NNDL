@@ -18,7 +18,7 @@ sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
 tweet_counts  = defaultdict(int)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
-model = SentenceTransformer("LaBSE").to(device).eval()  # or 'cpu'
+model = SentenceTransformer("multi-qa-mpnet-base-dot-v1").to(device).eval()  # or 'cpu'
 processed     = 0
 
 # (optional) resume checkpoint
