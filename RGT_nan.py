@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from Dataset import MGTAB, TwiBot22
+from Dataset import MGTAB, MGTABNew
 from models import RGT
 from utils import sample_mask
 import numpy as np
@@ -32,8 +32,8 @@ args = parser.parse_args()
 def main(seed):
     args.num_edge_type = len(args.relation_select)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset = TwiBot22('./Dataset/TwiBot22-as-MGTAB-10k')
-    data = dataset[0]
+    dataset = MGTABNan('./Dataset/TwiBot22-as-MGTAB-10k')
+    data = dataset[0].to(device)
 
     if args.task == 'stance':
         args.out_dim = 3

@@ -293,7 +293,7 @@ class RGT_multimodal(nn.Module):
         self.img_proj = nn.Sequential(nn.Linear(args.img_feat_dim, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
         # Two relational graph layers
         self.RGT1 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
-        self.RGT2 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
+        # self.RGT2 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
         # Classification head
         self.head = nn.Sequential(nn.Linear(args.hidden_dimension, args.out_channel), nn.LeakyReLU(), nn.Dropout(self.dropout), nn.Linear(args.out_channel, args.out_dim))
         self._init_weights()

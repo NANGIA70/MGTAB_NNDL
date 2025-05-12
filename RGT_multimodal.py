@@ -33,7 +33,7 @@ def main(seed):
 
     args.num_edge_type = len(args.relation_select)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset = MGTABNew('./Dataset/MGTAB-new')
+    dataset = MGTABNew('./Dataset/TwiBot22-as-MGTAB-10k')
     data = dataset[0]
 
     if args.task == 'stance':
