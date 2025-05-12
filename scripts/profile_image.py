@@ -11,8 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 DATA_DIR     = "/mnt/gcs/TwiBot-22"   # directory containing user.json
 OUTPUT_FILE  = "profile_image_feats.pt"
-BATCH_SIZE   = 512                    # images per CLIP forward pass
-MAX_WORKERS  = 50                     # parallel download threads
+BATCH_SIZE   = 128                    # images per CLIP forward pass
+MAX_WORKERS  = 100                     # parallel download threads
 DEVICE       = torch.device('cuda' if torch.cuda.is_available()
                             else 'mps'  if torch.backends.mps.is_available()
                             else 'cpu')
@@ -81,20 +81,27 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
         batch_uids.append(uid)
 
         if len(batch_imgs) >= BATCH_SIZE:
-            # Preprocess & embed
-            inputs = processor(images=batch_imgs, return_tensors="pt").to(DEVICE)
-            if DEVICE.type == 'cuda':
-                with torch.cuda.amp.autocast():
-                    feats = model(**inputs).pooler_output
-            else:
-                feats = model(**inputs).pooler_output
+           # 1) forward under no_grad autocast (CUDA only)
+           inputs = processor(images=batch_imgs, return_tensors="pt").to(DEVICE)
+           with torch.no_grad():
+               if DEVICE.type == 'cuda':
+                   with torch.cuda.amp.autocast():
+                       out = model(**inputs).pooler_output
+               else:
+                   out = model(**inputs).pooler_output
 
-            # Move to CPU and accumulate
-            for u, f in zip(batch_uids, feats.cpu()):
-                sum_feats[u] = f
+           # 2) move to CPU & free GPU memory
+           feats_cpu = out.cpu()
+           del out, inputs
+           if DEVICE.type == 'cuda':
+               torch.cuda.empty_cache()
 
-            batch_imgs.clear()
-            batch_uids.clear()
+           # 3) accumulate on CPU
+           for u, f in zip(batch_uids, feats_cpu):
+               sum_feats[u] = f
+
+           batch_imgs.clear()
+           batch_uids.clear()
 
 # Flush any remaining
 if batch_imgs:
