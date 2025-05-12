@@ -13,7 +13,7 @@ CHECKPOINT_INTERVAL  = 1_000_000        # save every 1M tweets
 BATCH_SIZE      = 128
 
 tweet_files = sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json")))
-sum_embeds    = defaultdict(lambda: torch.zeros(768))
+sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
 tweet_counts  = defaultdict(int)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
