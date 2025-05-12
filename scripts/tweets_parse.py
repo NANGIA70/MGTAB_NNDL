@@ -11,14 +11,17 @@ import time
 DATA_DIR = "/mnt/gcs/TwiBot-22"      # <-- GCS is now mounted here
 CHECKPOINT_FILE = "tweet_feats_checkpoint.pkl"
 CHECKPOINT_INTERVAL  = 1_000_000        # save every 1M tweets
-BATCH_SIZE      = 512
+BATCH_SIZE = 1024
 
 tweet_files = sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json")))
 sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
 tweet_counts  = defaultdict(int)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
-model = SentenceTransformer("multi-qa-mpnet-base-dot-v1").to(device).eval()  # or 'cpu'
+model = SentenceTransformer("LaBSE").to(device).eval()  # or 'cpu'
+print("Model device:", next(model.model.parameters()).device)
+print("CUDA available:", torch.cuda.is_available())
+print("CUDA devices:", torch.cuda.device_count(), torch.cuda.get_device_name(0))
 processed     = 0
 
 # (optional) resume checkpoint
