@@ -4,6 +4,7 @@ from PIL import Image
 from io import BytesIO
 from tqdm.auto import tqdm
 from transformers import CLIPProcessor, CLIPModel
+from pathlib import Path
 
 # Config
 USER_JSON   = '/mnt/gcs/TwiBot-22/user.json'
@@ -77,7 +78,7 @@ if imgs:
         counts[u]      = 1
 
 # assemble tensor
-ordered  = [str(u) for u in users_df['id']]
+ordered  = [str(u) for u in users_df['id']] 
 rows     = [ sum_feats.get(u, torch.zeros(768)) for u in ordered ]
 tensor   = torch.stack(rows, dim=0)
 torch.save(tensor, OUT_FILE)
