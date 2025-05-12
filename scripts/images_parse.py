@@ -6,6 +6,7 @@ from PIL import Image
 from io import BytesIO
 from transformers import CLIPProcessor, CLIPModel
 import pandas as pd
+from pathlib import Path
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 DATA_DIR               = "/mnt/gcs/TwiBot-22"            # where tweet_*.json lives
