@@ -67,6 +67,7 @@ print(f"Filtered down to {len(users_df):,} users.")
 # ─── EXTRACT IDS & PROFILE URLS ──────────────────────────────────────────────
 uids = users_df['id'].astype(str).tolist()
 urls = users_df['profile_image_url'].fillna('').tolist()
+
 num_users = len(uids)
 uid2idx = {uid: i for i, uid in enumerate(uids)}
 
@@ -77,41 +78,96 @@ model     = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")\
                      .vision_model.to(DEVICE).eval()
 if DEVICE.type=='cuda': torch.backends.cudnn.benchmark=True
 
-# ─── PREALLOCATE & FETCH ───────────────────────────────────────────────────
-image_feats = torch.zeros((num_users,768), device=DEVICE)
-def fetch(uid):
-    url = urls.get(str(uid),'')
-    if not url: return uid, None
+# ─── PREALLOCATE OUTPUT TENSOR ──────────────────────────────────────────────
+image_feats = torch.zeros((num_users, 768), device=DEVICE)
+
+# ─── DOWNLOAD HELPER ─────────────────────────────────────────────────────────
+def fetch_image(uid_url):
+    uid, url = uid_url
+    if not url:
+        return uid, None
     try:
-        r = requests.get(url, timeout=5)
-        img = Image.open(BytesIO(r.content)).convert("RGB")
+        resp = requests.get(url, timeout=5)
+        img  = Image.open(BytesIO(resp.content)).convert("RGB")
         return uid, img
+    except KeyboardInterrupt:
+        sys.exit(0)
     except:
         return uid, None
 
-# ─── STREAM & EMBED ────────────────────────────────────────────────────────
-print("Processing images…")
+# ─── STREAMING DOWNLOAD & BATCHED EMBED ─────────────────────────────────────
 batch_imgs, batch_idxs = [], []
 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
-    for uid,img in tqdm(exe.map(fetch, uids), total=num_users, desc="Profile"):
-        if img is None: continue
-        batch_imgs.append(img); batch_idxs.append(uid2idx[str(uid)])
-        if len(batch_imgs)>=BATCH_SIZE:
-            inp = processor(images=batch_imgs,return_tensors="pt").to(DEVICE)
+    for uid, img in tqdm(exe.map(fetch_image, zip(uids, urls)),
+                         total=num_users,
+                         desc="Download & Embed"):
+        if img is None:
+            continue
+        batch_imgs.append(img)
+        batch_idxs.append(uid2idx[uid])
+        if len(batch_imgs) >= BATCH_SIZE:
+            inputs = processor(images=batch_imgs, return_tensors="pt").to(DEVICE)
+            # mixed precision on CUDA
             with torch.no_grad():
-                if DEVICE.type=='cuda':
-                    with torch.cuda.amp.autocast(): feats=model(**inp).pooler_output
+                if DEVICE.type == 'cuda':
+                    with torch.cuda.amp.autocast():
+                        feats = model(**inputs).pooler_output
                 else:
-                    feats=model(**inp).pooler_output
+                    feats = model(**inputs).pooler_output
             image_feats[batch_idxs] = feats
-            batch_imgs, batch_idxs = [], []
-# final
+            batch_imgs.clear()
+            batch_idxs.clear()
+# flush remainder
 if batch_imgs:
-    inp = processor(images=batch_imgs,return_tensors="pt").to(DEVICE)
+    inputs = processor(images=batch_imgs, return_tensors="pt").to(DEVICE)
     with torch.no_grad():
-        feats = model(**inp).pooler_output
+        if DEVICE.type == 'cuda':
+            with torch.cuda.amp.autocast():
+                feats = model(**inputs).pooler_output
+        else:
+            feats = model(**inputs).pooler_output
     image_feats[batch_idxs] = feats
 
-# ─── SAVE ──────────────────────────────────────────────────────────────────
+# ─── SAVE TO DISK ────────────────────────────────────────────────────────────
+print("Saving final tensor…")
 torch.save(image_feats.cpu(), OUTPUT_FILE)
-print(f"Saved profile → {OUTPUT_FILE}  shape={image_feats.shape}")
+print(f"✅ Saved {OUTPUT_FILE} with shape {image_feats.shape}")
+
+# # ─── PREALLOCATE & FETCH ───────────────────────────────────────────────────
+# image_feats = torch.zeros((num_users,768), device=DEVICE)
+# def fetch(uid):
+#     url = urls.get(str(uid),'')
+#     if not url: return uid, None
+#     try:
+#         r = requests.get(url, timeout=5)
+#         img = Image.open(BytesIO(r.content)).convert("RGB")
+#         return uid, img
+#     except:
+#         return uid, None
+
+# # ─── STREAM & EMBED ────────────────────────────────────────────────────────
+# print("Processing images…")
+# batch_imgs, batch_idxs = [], []
+# with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
+#     for uid,img in tqdm(exe.map(fetch, uids), total=num_users, desc="Profile"):
+#         if img is None: continue
+#         batch_imgs.append(img); batch_idxs.append(uid2idx[str(uid)])
+#         if len(batch_imgs)>=BATCH_SIZE:
+#             inp = processor(images=batch_imgs,return_tensors="pt").to(DEVICE)
+#             with torch.no_grad():
+#                 if DEVICE.type=='cuda':
+#                     with torch.cuda.amp.autocast(): feats=model(**inp).pooler_output
+#                 else:
+#                     feats=model(**inp).pooler_output
+#             image_feats[batch_idxs] = feats
+#             batch_imgs, batch_idxs = [], []
+# # final
+# if batch_imgs:
+#     inp = processor(images=batch_imgs,return_tensors="pt").to(DEVICE)
+#     with torch.no_grad():
+#         feats = model(**inp).pooler_output
+#     image_feats[batch_idxs] = feats
+
+# # ─── SAVE ──────────────────────────────────────────────────────────────────
+# torch.save(image_feats.cpu(), OUTPUT_FILE)
+# print(f"Saved profile → {OUTPUT_FILE}  shape={image_feats.shape}")
