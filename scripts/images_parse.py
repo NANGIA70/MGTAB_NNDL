@@ -10,9 +10,9 @@ import json
 import requests
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
-TWEET_JSON_GLOB   = '../Dataset/TwiBot-22/tweet_*.json'
-USER_JSON         = '../Dataset/TwiBot-22/user.json'
-DATA_DIR         = '../Dataset/TwiBot-22'
+TWEET_JSON_GLOB   = '/mnt/gcs/tweet_*.json'
+USER_JSON         = '/mnt/gcs/user.json'
+DATA_DIR         = '/mnt/gcs/TwiBot-22'  # GCS mountpoint
 OUTPUT_FILE       = 'image_feats.pt'
 BATCH_SIZE        = 64       # GPU embed batch size (reduced to avoid OOM)
 MAX_PER_USER      = 5       # max images per user
