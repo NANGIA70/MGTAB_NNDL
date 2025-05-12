@@ -15,14 +15,23 @@ CHECKPOINT_INTERVAL  = 1_000_000        # save every 1M tweets
 BATCH_SIZE = 512
 
 tweet_files = sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json")))
-sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
-tweet_counts  = defaultdict(int)
+# sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
+# tweet_counts  = defaultdict(int)
+
+sum_embeds   = {}    # user_id → Tensor
+tweet_counts = {}    # user_id → int
+
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 model = SentenceTransformer("msmarco-distilbert-dot-v5").to(device).eval()  # or 'cpu'
 
 print("CUDA available:", torch.cuda.is_available())
 print("Model device:", next(model.parameters()).device)
+if device == "cuda":
+    print("GPU name:      ", torch.cuda.get_device_name(0))
+    torch.backends.cudnn.benchmark = True
+    
 processed     = 0
 
 # (optional) resume checkpoint
@@ -98,6 +107,9 @@ def flush_batch():
         )
     # 2b) Accumulate
     for uid, emb in zip(batch_uids, embs):
+        if uid not in sum_embeds:
+            sum_embeds[uid]   = torch.zeros(768, device=device)
+            tweet_counts[uid] = 0
         sum_embeds[uid]   += emb
         tweet_counts[uid] += 1
 
