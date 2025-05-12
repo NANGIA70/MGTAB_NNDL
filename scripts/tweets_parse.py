@@ -3,6 +3,7 @@ from sentence_transformers import SentenceTransformer
 from collections import defaultdict
 from tqdm.auto import tqdm
 import pandas as pd
+from pathlib import Path
 import json
 
 # ─── NEW: point at the mountpoint ──────────────────────────────

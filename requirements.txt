@@ -1,6 +1,7 @@
 # Core packages
 pandas
 sentence-transformers
+ijson
 torch==2.1.0
 torchvision==0.16.0
 torchaudio==2.1.0
@@ -23,4 +24,5 @@ pytorch-lightning==1.9.5
 # pip install torch-geometric
 # pip install scikit-learn==1.0.2 pytorch-lightning==1.9.5
 
+# gcloud compute ssh twi-bot --zone us-east1-d
 
