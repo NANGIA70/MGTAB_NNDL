@@ -14,7 +14,7 @@ OUTPUT_FILE          = "image_feats_10k.pt"
 CHECKPOINT_FILE      = "image_feats_10k_ckpt.pkl"
 CHECKPOINT_INTERVAL  = 50_000                      # checkpoint every 50k images
 BATCH_SIZE           = 64                          # images per CLIP forward
-MAX_IMAGES_PER_USER  = 20                          # cap per user
+MAX_IMAGES_PER_USER  = 5                          # cap per user
 
 # ─── LOAD SAMPLE UIDs ─────────────────────────────────────────────────────
 sample_df = pd.read_csv(SAMPLE_UID_CSV, dtype=str)
