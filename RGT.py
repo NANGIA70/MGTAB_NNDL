@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from Dataset import MGTAB, MGTABNew
+from Dataset import MGTAB
 from models import RGT
 from utils import sample_mask
 import numpy as np
@@ -33,7 +33,7 @@ def main(seed):
 
     args.num_edge_type = len(args.relation_select)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset = MGTABNew('./Dataset/MGTAB-new')
+    dataset = MGTAB('./Dataset/MGTAB')
     data = dataset[0]
 
     if args.task == 'stance':
@@ -90,7 +90,7 @@ def main(seed):
 
     def train(epoch):
         model.train()
-        output = model(data.x, edge_index, edge_type, data.img)
+        output = model(data.x, edge_index, edge_type)
         loss_train = loss(output[data.train_mask], data.y[data.train_mask])
         output = output.max(1)[1].to('cpu').detach().numpy()
         label = data.y.to('cpu').detach().numpy()
@@ -108,7 +108,7 @@ def main(seed):
 
     def test():
         model.eval()
-        output = model(data.x, edge_index, edge_type, data.img)
+        output = model(data.x, edge_index, edge_type)
         loss_test = loss(output[data.test_mask], data.y[data.test_mask])
         output = output.max(1)[1].to('cpu').detach().numpy()
         label = data.y.to('cpu').detach().numpy()
