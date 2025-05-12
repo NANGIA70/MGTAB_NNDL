@@ -61,8 +61,8 @@ for fn in tqdm(sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json"))),
                 tw.get('entities',{}).get('media',[]) +
                 tw.get('extended_entities',{}).get('media',[])
             )
-            if media:
-                print(f"Media: {media}")
+            # if media:
+            #     print(f"Media: {media}")
             if not media:
                 continue
 
