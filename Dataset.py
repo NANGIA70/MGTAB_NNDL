@@ -183,3 +183,76 @@ class MGTABlarge(InMemoryDataset):
 
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
+
+
+class MGTABNew(InMemoryDataset):
+    def __init__(self, root, transform=None, pre_transform=None):
+        super().__init__(root, transform, pre_transform)
+        self.root = root
+        self.data, self.slices = torch.load(self.processed_paths[0])
+
+    @property
+    def raw_file_names(self):
+        return [
+            'sample_uids_10k.csv',
+            'node_meta_10k.json',
+            'num_properties_tensor_10k.pt',
+            'tweets_tensor_10k.pt',
+            'profile_image_feats_10k.pt',
+            'image_feats_10k.pt',
+            'edge_index_10k.pt',
+            'edge_type_10k.pt',
+            'edge_weight_10k.pt',
+            'label_10k.pt',
+            'train_mask_10k.pt',
+            'valid_mask_10k.pt',
+            'test_mask_10k.pt',
+        ]
+
+    @property
+    def processed_file_names(self):
+        return ['data.pt']
+
+    def process(self):
+        rd = self.root
+        # Node features
+        prop    = torch.load(rd + '/num_properties_tensor_10k.pt')
+        tweet   = torch.load(rd + '/tweets_tensor_10k.pt')
+        profile = torch.load(rd + '/profile_image_feats_10k.pt')
+        images  = torch.load(rd + '/image_feats_10k.pt')
+
+        x = torch.cat([prop, tweet, profile], dim=1)
+
+        # Graph
+        edge_index  = torch.load(rd + '/edge_index_10k.pt')
+        edge_type   = torch.load(rd + '/edge_type_10k.pt')
+        edge_weight = torch.load(rd + '/edge_weight_10k.pt')
+
+        # Labels and masks
+        label      = torch.load(rd + '/label_10k.pt')
+        train_mask = torch.load(rd + '/train_mask_10k.pt')
+        val_mask   = torch.load(rd + '/valid_mask_10k.pt')
+        test_mask  = torch.load(rd + '/test_mask_10k.pt')
+
+        # assemble Data
+        data = Data(x=x, edge_index=edge_index)
+        data.edge_type   = edge_type
+        data.edge_weight = edge_weight
+        data.y1 = label
+        data.y2 = label
+        data.y  = label
+        data.train_mask = train_mask
+        data.val_mask   = val_mask
+        data.test_mask  = test_mask
+        data.img        = images
+
+        # filters and transform
+        data_list = [data]
+        if self.pre_filter:
+            data_list = [d for d in data_list if self.pre_filter(d)]
+        if self.pre_transform:
+            data_list = [self.pre_transform(d) for d in data_list]
+
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
+

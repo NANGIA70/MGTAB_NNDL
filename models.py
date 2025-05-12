@@ -4,6 +4,7 @@ from torch_geometric.nn import GCNConv, GATConv, SAGEConv
 from torch_geometric.nn import HGTConv, RGCNConv
 from layer import RGTLayer, SimpleHGNLayer
 import torch.nn.functional as F
+from torchvision import models
 
 
 class BotRGCN(nn.Module):
@@ -213,7 +214,6 @@ class HGT(nn.Module):
 
         return x
 
-
 class RGT(nn.Module):
     def __init__(self, args):
         super(RGT, self).__init__()
@@ -249,8 +249,6 @@ class RGT(nn.Module):
 
         return x
 
-
-
 class SHGN(nn.Module):
     def __init__(self, args):
         super(SHGN, self).__init__()
@@ -284,3 +282,44 @@ class SHGN(nn.Module):
         user_features = self.drop(self.ReLU(self.out1(user_features)))
         x = self.out2(user_features)
         return x
+    
+class RGT_multimodal(nn.Module):
+    def __init__(self, args):
+        super(RGT_multimodal, self).__init__()
+        self.dropout = args.dropout
+        # Text branch projection
+        self.text_proj = nn.Sequential(nn.Linear(args.features_num, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
+        # Image branch projection (CLIP embeddings)
+        self.img_proj = nn.Sequential(nn.Linear(args.img_feat_dim, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
+        # Two relational graph layers
+        self.RGT1 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
+        self.RGT2 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
+        # Classification head
+        self.head = nn.Sequential(nn.Linear(args.hidden_dimension, args.out_channel), nn.LeakyReLU(), nn.Dropout(self.dropout), nn.Linear(args.out_channel, args.out_dim))
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_uniform_(m.weight)
+                if m.bias is not None:
+                    m.bias.data.zero_()
+
+    def forward(self, features, edge_index, edge_type, img=None):
+        # 1) Text branch
+        txt_feats = self.text_proj(features)
+        # 2) Image branch (use zeros if no image)
+        if img is not None:
+            img_feats = self.img_proj(img)
+        else:
+            img_feats = torch.zeros_like(txt_feats)
+        # 3) Fuse
+        h = txt_feats + img_feats
+        # 4) Graph layers
+        h = self.RGT1(h, edge_index, edge_type)
+        h = torch.relu(h)
+        h = self.RGT2(h, edge_index, edge_type)
+        h = torch.relu(h)
+        # 5) Head
+        out = self.head(h)
+        return out

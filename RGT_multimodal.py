@@ -7,14 +7,14 @@ from torch import nn
 from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from Dataset import MGTAB, MGTABNew
-from models import RGT
+from models import RGT_multimodal
 from utils import sample_mask
 import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 
 
-parser = argparse.ArgumentParser(description='RGT')
+parser = argparse.ArgumentParser(description=' RGT_multimodal')
 parser.add_argument('--task', type=str, default='bot', help='detection task of stance or bot')
 parser.add_argument('--relation_select', type=int, default=[0,1], nargs='+', help='selection of relations in the graph (0-6)')
 parser.add_argument('--random_seed', type=int, default=[1,2,3,4,5], nargs='+', help='selection of random seeds')
@@ -61,7 +61,7 @@ def main(seed):
     val_mask = data.val_mask
     data = data.to(device)
 
-    model = RGT(args).to(device)
+    model =  RGT_multimodal(args).to(device)
     loss = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -132,7 +132,7 @@ def main(seed):
             max_recall = recall
 
             print('Saving model...')
-            torch.save(model.state_dict(), 'RGT_{}_seed_{}.pkl'.format(args.task, seed))
+            torch.save(model.state_dict(), ' RGT_multimodal_{}_seed_{}.pkl'.format(args.task, seed))
             print('Model saved!')
 
     print("Test set results:",
