@@ -6,12 +6,13 @@ import pandas as pd
 from pathlib import Path
 import json
 import time
+from torch.cuda.amp import autocast
 
 # ─── NEW: point at the mountpoint ──────────────────────────────
 DATA_DIR = "/mnt/gcs/TwiBot-22"      # <-- GCS is now mounted here
 CHECKPOINT_FILE = "tweet_feats_checkpoint.pkl"
 CHECKPOINT_INTERVAL  = 1_000_000        # save every 1M tweets
-BATCH_SIZE = 1024
+BATCH_SIZE = 512
 
 tweet_files = sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json")))
 sum_embeds    = defaultdict(lambda: torch.zeros(768, device=device))
@@ -87,13 +88,14 @@ def flush_batch():
         return
 
     # 2a) Batch-encode
-    embs = model.encode(
-        batch_texts,
-        convert_to_tensor=True,
-        batch_size=BATCH_SIZE,
-        show_progress_bar=False,
-        device=str(device),
-    )
+    with autocast():
+        embs = model.encode(
+            batch_texts,
+            convert_to_tensor=True,
+            batch_size=BATCH_SIZE,
+            show_progress_bar=False,
+            device=str(device),
+        )
     # 2b) Accumulate
     for uid, emb in zip(batch_uids, embs):
         sum_embeds[uid]   += emb
