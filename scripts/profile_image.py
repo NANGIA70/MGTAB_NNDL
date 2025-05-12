@@ -69,13 +69,19 @@ def fetch_image(uid_url):
     except:
         return uid, None
 
-# ─── STREAMING DOWNLOAD + BATCHED EMBED ────────────────────────────────────
+# ─── STREAMING DOWNLOAD  BATCHED EMBED ────────────────────────────────────
 batch_imgs, batch_idxs = [], []
 
 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
-    for uid, img in tqdm(exe.map(fetch_image, zip(uids, urls)),
-                         total=num_users,
-                         desc="Download&Embed"):
+    # submit all download tasks up-front
+    futures = [exe.submit(fetch_image, (uid, url))
+               for uid, url in zip(uids, urls)]
+
+    # as_completed yields futures as each download finishes
+    for future in tqdm(as_completed(futures),
+                       total=num_users,
+                       desc="Download&Embed"):
+        uid, img = future.result()
         if img is None:
             continue
         batch_imgs.append(img)
@@ -97,14 +103,15 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
 # flush remaining
 if batch_imgs:
     inputs = processor(images=batch_imgs, return_tensors="pt").to(DEVICE)
-    with torch.cuda.amp.autocast(enabled=(DEVICE.type=='cuda')):
-        feats = model(**inputs).pooler_output
+    with torch.no_grad():
+        with torch.cuda.amp.autocast(enabled=(DEVICE.type=='cuda')):
+            feats = model(**inputs).pooler_output
     image_feats[batch_idxs] = feats
 
 # ─── SAVE TO DISK ────────────────────────────────────────────────────────────
 print("Saving final tensor to disk…")
 torch.save(image_feats.cpu(), OUTPUT_FILE)
-print(f"✅ Saved {OUTPUT_FILE} with shape {image_feats.shape}")
+print(f"Saved {OUTPUT_FILE} with shape {image_feats.shape}")
 # ─── OLD CODE ───────────────────────────────────────────────────────────────
 
 # # ─── EXTRACT IDS & URLS ─────────────────────────────────────────────────────
