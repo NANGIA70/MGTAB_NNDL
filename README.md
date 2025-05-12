@@ -4,6 +4,9 @@ MGTAB: A Multi-Relational Graph-Based Twitter Account Detection Benchmark
 ## Introduction
 MGTAB is the first standardized graph-based benchmark for stance and bot detection. MGTAB contains 10,199 expert-annotated users
 and 7 types of relationships, ensuring high-quality annotation and diversified relations. For more details, please refer to the MGTAB paper.
+
+## Adapted Dataset Link
+https://drive.google.com/drive/folders/1ZTcSspJPoLv_68ZCO4-dj72aS_aNJlHF?usp=sharing
  
 ### Distribution of labels in annotations.
 <table>
