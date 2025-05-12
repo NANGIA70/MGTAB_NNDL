@@ -138,6 +138,7 @@ for fn in tweet_files:
         for tw in tqdm(ijson.items(f, 'item'),
                        desc=f"Streaming {os.path.basename(fn)}",
                        leave=False):
+            uid  = tw['author_id']
             text = tw.get('text','').strip()
             if not text:
                 continue
@@ -148,7 +149,7 @@ for fn in tweet_files:
                 continue
             seen_per_user[uid] = c + 1
 
-            batch_uids.append(tw['author_id'])
+            batch_uids.append(uid)
             batch_texts.append(text)
 
             if len(batch_texts) >= BATCH_SIZE:
