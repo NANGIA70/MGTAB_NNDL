@@ -1,136 +1,48 @@
-# images_parse.py
-
-import os, glob, pickle, torch, ijson, requests, json
-from tqdm.auto import tqdm
+#!/usr/bin/env python3
+import os, glob, asyncio, aiohttp, torch, ijson
 from PIL import Image
 from io import BytesIO
+from tqdm.auto import tqdm
 from transformers import CLIPProcessor, CLIPModel
 import pandas as pd
 from pathlib import Path
+import json
+import requests
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
-DATA_DIR               = "/mnt/gcs/TwiBot-22"            # where tweet_*.json lives
-USER_JSON              = os.path.join(DATA_DIR, "user.json")
-IMAGE_CHECKPOINT       = "image_feats_checkpoint.pt"
-IMAGE_CHECKPOINT_INTVL = 100_000                         # checkpoint every 100k images
-MAX_IMAGES_PER_USER    = 10                              # cap per user
-IMAGE_BATCH_SIZE       = 512 
-DEVICE                 = "cuda" if torch.cuda.is_available() else "cpu"
+TWEET_JSON_GLOB   = '../Dataset/TwiBot-22/tweet_*.json'
+USER_JSON         = '../Dataset/TwiBot-22/user.json'
+DATA_DIR         = '../Dataset/TwiBot-22'
+OUTPUT_FILE       = 'image_feats.pt'
+BATCH_SIZE        = 64       # GPU embed batch size (reduced to avoid OOM)
+MAX_PER_USER      = 5       # max images per user
+MAX_CONCURRENT    = 100      # parallel HTTP sessions
+MAX_IMAGES_PER_USER = 5      # cap per user
+CHECKPOINT_INTVL    = 100_000 # image‐level checkpoint interval
+CHECKPOINT_FILE     = "image_feats_checkpoint.pt"
 
-# ─── SETUP ─────────────────────────────────────────────────────────────────
-print(f"Using device: {DEVICE}")
-processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+# ─── DEVICE ────────────────────────────────────────────────────────────────
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+print(f"Using device: {device}")
+
+# ─── MODEL ─────────────────────────────────────────────────────────────────
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", use_fast=True)
 model     = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")\
-                      .vision_model.to(DEVICE).eval()
-
-if DEVICE == "cuda":
+                     .vision_model.to(device).eval()
+if device.type=="cuda":
     torch.backends.cudnn.benchmark = True
 
-# state dictionaries
-sum_img_feats   = {}   # user_id → running sum tensor [768]
-img_counts      = {}   # user_id → how many images added
-processed_images= 0
-
-# ─── RESUME FROM CHECKPOINT ────────────────────────────────────────────────
-if os.path.exists(IMAGE_CHECKPOINT):
-    ckpt = torch.load(IMAGE_CHECKPOINT, map_location="cpu")
-    # move back to DEVICE
-    for uid, feat in ckpt['sum_img_feats'].items():
-        sum_img_feats[uid] = feat.to(DEVICE)
-    img_counts       = ckpt['img_counts']
-    processed_images = ckpt['processed_images']
-    print(f"▶ Resumed at {processed_images} images processed")
-
-def save_checkpoint():
-    """Dump partial sums/counts to disk so we can resume."""
-    cpu_feats = { uid: feat.cpu()
-                  for uid, feat in sum_img_feats.items() }
-    torch.save({
-        'sum_img_feats':   cpu_feats,
-        'img_counts':      img_counts,
-        'processed_images':processed_images
-    }, IMAGE_CHECKPOINT)
-    print(f"💾 Checkpoint @ {processed_images} images")
-
-# ─── HELPERS ────────────────────────────────────────────────────────────────
-def download_image(url):
-    try:
-        r = requests.get(url, timeout=5)
-        return Image.open(BytesIO(r.content)).convert("RGB")
-    except:
-        return None
-
-def embed_batch(image_list):
-    """Returns a [N×768] tensor in half‐precision on DEVICE."""
-    inputs = processor(images=image_list, return_tensors="pt").to(DEVICE)
-    with torch.cuda.amp.autocast():
-        out = model(**inputs)
-    return out.pooler_output  # [N,768]
-
-# ─── STREAM & EMBED ────────────────────────────────────────────────────────
-img_buffer, uid_buffer = [], []
-
-for fn in tqdm(sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json"))),
-               desc="Files"):
-    with open(fn, 'r', encoding='utf-8') as f:
-        for tw in tqdm(ijson.items(f, 'item'),
-                       desc=os.path.basename(fn),
-                       leave=False,
-                       unit="imgs"):
-            uid = tw.get('author_id')
-            if img_counts.get(uid,0) >= MAX_IMAGES_PER_USER:
-                continue
-
-            # extract any media entries
-            media = (
-                tw.get('entities',{}).get('media',[]) +
-                tw.get('extended_entities',{}).get('media',[])
-            )
-            # if media:
-            #     print(f"Media: {media}")
-            if not media:
-                continue
-
-            for m in media:
-                url = m.get('media_url_https') or m.get('media_url') or m.get('url')
-                if not url:
-                    continue
-
-                # 1) download
-                try:
-                    resp = requests.get(url, timeout=5)
-                    img  = Image.open(BytesIO(resp.content)).convert("RGB")
-                except Exception:
-                    continue
-                if img is None:
-                    continue
-
-                img_counts[uid] = img_counts.get(uid,0) + 1
-                processed_images += 1
-
-                # buffer for batch encode
-                img_buffer.append(img)
-                uid_buffer.append(uid)
-
-                if len(img_buffer) >= IMAGE_BATCH_SIZE:
-                    feats = embed_batch(img_buffer)  # [B,768]
-                    for u, feat in zip(uid_buffer, feats):
-                        if u not in sum_img_feats:
-                            sum_img_feats[u] = torch.zeros(768, device=DEVICE).half()
-                        sum_img_feats[u] += feat
-                    img_buffer.clear()
-                    uid_buffer.clear()
-
-                # 4) checkpoint periodically
-                if processed_images % IMAGE_CHECKPOINT_INTVL == 0:
-                    save_checkpoint()
-
-                # stop if this user hit its cap
-                if img_counts[uid] >= MAX_IMAGES_PER_USER:
-                    break
-
-# final checkpoint
-save_checkpoint()
+# ─── STATE ─────────────────────────────────────────────────────────────────
+sum_feats     = {}   # uid -> CPU Tensor[768]
+img_counts    = {}   # uid -> int count
+buffer_imgs   = []
+buffer_uids   = []
+processed_imgs = 0
 
 # ─── AVERAGE & SAVE FINAL TENSOR ───────────────────────────────────────────
 # load ordered user list (must match your tweets/user parse)
@@ -161,15 +73,98 @@ users_df = pd.DataFrame(user_dicts)
 
 ordered_uids = users_df['id'].astype(str).tolist()
 
-# build one row-per-user
+# ─── CHECKPOINT HELPERS ─────────────────────────────────────────────────────
+def save_checkpoint():
+    cpu_feats = {uid:feat.cpu() for uid,feat in sum_feats.items()}
+    torch.save({
+        "sum_feats":      cpu_feats,
+        "img_counts":     img_counts,
+        "processed_imgs": processed_imgs
+    }, CHECKPOINT_FILE)
+    print(f"💾 Checkpoint @ {processed_imgs} images")
+
+# resume if exists
+if os.path.exists(CHECKPOINT_FILE):
+    ck = torch.load(CHECKPOINT_FILE, map_location="cpu")
+    sum_feats      = {uid:feat.to(device) for uid,feat in ck["sum_feats"].items()}
+    img_counts     = ck["img_counts"]
+    processed_imgs = ck["processed_imgs"]
+    print(f"▶ Resumed from {processed_imgs} images")
+
+# ─── EMBED + ACCUMULATE ────────────────────────────────────────────────────
+@torch.no_grad()
+def embed_and_accumulate():
+    global buffer_imgs, buffer_uids, processed_imgs
+    imgs, uids = buffer_imgs, buffer_uids
+    buffer_imgs, buffer_uids = [], []
+
+    # 1) forward (autocast only on CUDA)
+    inputs = processor(images=imgs, return_tensors="pt").to(device)
+    if device.type == "cuda":
+        with torch.cuda.amp.autocast():
+            feats = model(**inputs).pooler_output
+    else:
+        feats = model(**inputs).pooler_output
+
+    # 2) to CPU and free GPU/MPS
+    feats_cpu = feats.cpu()
+    del feats, inputs
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+    # 3) accumulate on CPU
+    for uid, feat in zip(uids, feats_cpu):
+        if img_counts.get(uid, 0) >= MAX_IMAGES_PER_USER:
+            continue
+        img_counts[uid] = img_counts.get(uid, 0) + 1
+        if uid not in sum_feats:
+            sum_feats[uid] = torch.zeros(768)
+        sum_feats[uid] += feat
+        processed_imgs += 1
+
+    # 4) checkpoint
+    if processed_imgs % CHECKPOINT_INTVL < BATCH_SIZE:
+        save_checkpoint()
+
+# ─── MAIN LOOP ─────────────────────────────────────────────────────────────
+for fn in tqdm(sorted(glob.glob(os.path.join(DATA_DIR, "tweet_*.json"))), desc="Files"):
+    with open(fn, "r", encoding="utf-8") as f:
+        for tw in tqdm(ijson.items(f, "item"),
+                       desc=os.path.basename(fn), leave=False, unit="imgs"):
+            uid = tw.get("author_id")
+            if img_counts.get(uid, 0) >= MAX_IMAGES_PER_USER:
+                continue
+
+            media = tw.get("entities",{}).get("media",[]) + tw.get("extended_entities",{}).get("media",[])
+            for m in media:
+                url = m.get("media_url_https") or m.get("media_url")
+                if not url:
+                    continue
+                try:
+                    resp = requests.get(url, timeout=5)
+                    img  = Image.open(BytesIO(resp.content)).convert("RGB")
+                except:
+                    continue
+
+                buffer_imgs.append(img)
+                buffer_uids.append(uid)
+                if len(buffer_imgs) >= BATCH_SIZE:
+                    embed_and_accumulate()
+                if img_counts.get(uid, 0) >= MAX_IMAGES_PER_USER:
+                    break
+
+# flush remainder
+if buffer_imgs:
+    embed_and_accumulate()
+save_checkpoint()
+
 rows = []
 for uid in ordered_uids:
     cnt = img_counts.get(uid, 0)
     if cnt > 0:
-        rows.append(sum_img_feats[uid] / cnt)
+        rows.append(sum_feats[uid] / cnt)
     else:
-        rows.append(torch.zeros(768, device=DEVICE))
-
-image_feats = torch.stack(rows, dim=0)      # [num_users, 768]
-torch.save(image_feats.cpu(), 'image_feats.pt')
-print(f"✅ Saved image_feats.pt with shape {image_feats.shape}")
+        rows.append(torch.zeros(768))
+image_feats = torch.stack(rows, dim=0)
+torch.save(image_feats, OUTPUT_FILE)
+print(f"✅ Saved {OUTPUT_FILE}: {image_feats.shape}")
