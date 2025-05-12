@@ -1,85 +1,106 @@
-# profile_images.py  — embeds each user’s profile picture instead
-import os, torch, requests, json, pandas as pd
-from PIL import Image
+#!/usr/bin/env python3
+import os, json, torch, requests, pandas as pd
+from pathlib import Path
 from io import BytesIO
+from PIL import Image
 from tqdm.auto import tqdm
 from transformers import CLIPProcessor, CLIPModel
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Config
+# ─── CONFIG ────────────────────────────────────────────────────────────────
 USER_JSON   = '/mnt/gcs/TwiBot-22/user.json'
-DATA_DIR   = '/mnt/gcs/TwiBot-22'  # GCS mountpoint
 OUT_FILE    = 'profile_image_feats.pt'
-BATCH_SIZE  = 512
-DEVICE      = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+BATCH_SIZE  = 512            # GPU embed batch size
+MAX_WORKERS = 50             # parallel downloader threads
+DEVICE      = torch.device('cuda' if torch.cuda.is_available()
+                           else 'mps' if torch.backends.mps.is_available()
+                           else 'cpu')
 
-# Load CLIP
+# ─── SETUP ─────────────────────────────────────────────────────────────────
+print("Using device:", DEVICE)
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", use_fast=True)
 model     = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")\
                      .vision_model.to(DEVICE).eval()
-if DEVICE.type=="cuda": torch.backends.cudnn.benchmark = True
+if DEVICE.type == 'cuda':
+    torch.backends.cudnn.benchmark = True
 
-# load users
-DATA_DIR = Path(DATA_DIR)
-# make sure the data directory exists
-if not DATA_DIR.exists():
-    raise FileNotFoundError(f"Data directory {DATA_DIR} does not exist.")
-
-def load_json_records(fname):
-    """Load a JSON file of array- or line- delimited records."""
-    path = DATA_DIR / fname
-    with open(path, 'r', encoding='utf-8') as f:
-        # if the file is a single large JSON array:
-        try:
-            data = json.load(f)
-        except json.JSONDecodeError:
-            # fallback: one JSON object per line
-            f.seek(0)
-            data = [json.loads(line) for line in f]
-    return data
-
+# ─── LOAD USERS ─────────────────────────────────────────────────────────────
 print("Loading user data…")
-user_dicts = load_json_records('user.json')
+with open(USER_JSON, 'r', encoding='utf-8') as f:
+    try:
+        users = json.load(f)
+    except json.JSONDecodeError:
+        f.seek(0)
+        users = [json.loads(line) for line in f]
 
-print(f"Loaded {len(user_dicts):,} users from {DATA_DIR / 'user.json'}. Now coverting to DataFrame…")
-users_df = pd.DataFrame(user_dicts)
+uids = [str(u['id']) for u in users]
+urls = [u.get('profile_image_url') for u in users]
 
-urls     = users_df['profile_image_url'].tolist()
-uids     = users_df['id'].astype(str).tolist()
-
-# Download & preprocess
-imgs, uids_buf, feats = [], [], []
-sum_feats, counts = {}, {}
-
-for uid, url in tqdm(zip(uids, urls), total=len(uids), desc="Users"):
+# ─── HELPERS ────────────────────────────────────────────────────────────────
+def fetch_image(uid_url):
+    uid, url = uid_url
+    if not url:
+        return uid, None
     try:
         r = requests.get(url, timeout=5)
         img = Image.open(BytesIO(r.content)).convert("RGB")
+        return uid, img
     except:
-        continue
-    imgs.append(img); uids_buf.append(uid)
-    if len(imgs) >= BATCH_SIZE:
-        # batch embed
-        inputs = processor(images=imgs, return_tensors="pt").to(DEVICE)
-        with torch.no_grad():
-            out = model(**inputs).pooler_output  # [B,768]
-        for u, f in zip(uids_buf, out):
-            sum_feats[u]   = f.cpu()
-            counts[u]      = 1
-        imgs.clear(); uids_buf.clear()
+        return uid, None
+
+# ─── MAIN: DOWNLOAD + BATCHED EMBED ─────────────────────────────────────────
+sum_feats   = {}      # uid → CPU Tensor[768]
+batch_imgs  = []
+batch_uids  = []
+
+with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
+    futures = {exe.submit(fetch_image, uv): uv for uv in zip(uids, urls)}
+
+    for future in tqdm(as_completed(futures),
+                       total=len(futures),
+                       desc="Downloading"):
+        uid, img = future.result()
+        if img is None:
+            continue
+
+        batch_imgs.append(img)
+        batch_uids.append(uid)
+
+        if len(batch_imgs) >= BATCH_SIZE:
+            # batch preprocess & embed
+            inputs = processor(images=batch_imgs, return_tensors="pt").to(DEVICE)
+            if DEVICE.type == 'cuda':
+                # mixed precision on CUDA
+                with torch.cuda.amp.autocast():
+                    feats = model(**inputs).pooler_output
+            else:
+                feats = model(**inputs).pooler_output
+
+            # move outputs to CPU & store
+            for u, f in zip(batch_uids, feats.cpu()):
+                sum_feats[u] = f
+
+            batch_imgs.clear()
+            batch_uids.clear()
 
 # flush remainder
-if imgs:
-    inputs = processor(images=imgs, return_tensors="pt").to(DEVICE)
-    with torch.no_grad():
-        out = model(**inputs).pooler_output
-    for u, f in zip(uids_buf, out):
-        sum_feats[u]   = f.cpu()
-        counts[u]      = 1
+if batch_imgs:
+    inputs = processor(images=batch_imgs, return_tensors="pt").to(DEVICE)
+    if DEVICE.type == 'cuda':
+        with torch.cuda.amp.autocast():
+            feats = model(**inputs).pooler_output
+    else:
+        feats = model(**inputs).pooler_output
 
-# assemble tensor
-ordered  = [str(u) for u in users_df['id']] 
-rows     = [ sum_feats.get(u, torch.zeros(768)) for u in ordered ]
-tensor   = torch.stack(rows, dim=0)
+    for u, f in zip(batch_uids, feats.cpu()):
+        sum_feats[u] = f
+
+# ─── STACK & SAVE ───────────────────────────────────────────────────────────
+print("Building final tensor…")
+rows = []
+zero = torch.zeros(768)
+for uid in uids:
+    rows.append(sum_feats.get(uid, zero))
+tensor = torch.stack(rows, dim=0)
 torch.save(tensor, OUT_FILE)
-print("Saved", OUT_FILE, "shape", tensor.shape)
+print(f"✅ Saved {OUT_FILE} with shape {tensor.shape}")
