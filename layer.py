@@ -130,4 +130,4 @@ class RGTLayer(torch.nn.Module):
             output = torch.mul(torch.tanh(u), a) + torch.mul(features, (1 - a))
             semantic_embeddings = torch.cat((semantic_embeddings, output.unsqueeze(1)), dim=1)
 
-            return self.semantic_attention(semantic_embeddings)
+        return self.semantic_attention(semantic_embeddings)
