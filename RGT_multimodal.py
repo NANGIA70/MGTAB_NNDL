@@ -6,10 +6,11 @@ import torch
 from torch import nn
 from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from Dataset import MGTAB, MGTABNew
+from Dataset import MGTABNew
 from models import RGT_multimodal
 from utils import sample_mask
 import numpy as np
+import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -17,7 +18,7 @@ warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser(description=' RGT_multimodal')
 parser.add_argument('--task', type=str, default='bot', help='detection task of stance or bot')
 parser.add_argument('--relation_select', type=int, default=[0,1], nargs='+', help='selection of relations in the graph (0-6)')
-parser.add_argument('--random_seed', type=int, default=[1,2,3,4,5], nargs='+', help='selection of random seeds')
+parser.add_argument('--random_seed', type=int, default=[1], nargs='+', help='selection of random seeds')
 parser.add_argument('--hidden_dimension', type=int, default=128, help='number of hidden units')
 parser.add_argument("--out_channel", type=int, default=64, help="out channels")
 parser.add_argument('--trans_head', type=int, default=4, help='number of trans_head')
@@ -36,15 +37,11 @@ def main(seed):
     dataset = MGTABNew('./Dataset/MGTAB-new')
     data = dataset[0]
 
-    if args.task == 'stance':
-        args.out_dim = 3
-        data.y = data.y1
-    else:
-        args.out_dim = 2
-        data.y = data.y2
+    args.out_dim = 2
 
     sample_number = len(data.y)
     args.features_num = data.x.shape[1]
+    args.img_feat_dim = data.img.shape[1]
 
     shuffled_idx = shuffle(np.array(range(sample_number)), random_state=seed)
     train_idx = shuffled_idx[:int(0.7 * sample_number)]
@@ -83,8 +80,8 @@ def main(seed):
         index_select_list = index_select_list + new_indx_select
         data.edge_type[new_indx_select] = number
         print('{}'.format(relation_dict[features_index]), end='  ')
-    edge_index = data.edge_index[:, index_select_list]
-    edge_type = data.edge_type[index_select_list]
+    edge_index = data.edge_index[:, index_select_list].long()
+    edge_type = data.edge_type[index_select_list].long()
     edge_weight = data.edge_weight[index_select_list]
 
 
@@ -99,6 +96,7 @@ def main(seed):
         optimizer.zero_grad()
         loss_train.backward()
         optimizer.step()
+        total_loss.append(loss_train.item())
         print('Epoch: {:04d}'.format(epoch + 1),
               'loss_train: {:.4f}'.format(loss_train.item()),
               'acc_train: {:.4f}'.format(acc_train.item()),
@@ -120,6 +118,7 @@ def main(seed):
 
 
     max_val_acc = 0
+    total_loss = []
     for epoch in range(args.epochs):
         acc_val = train(epoch)
         acc_test, loss_test, f1, precision, recall = test()
@@ -134,7 +133,6 @@ def main(seed):
             print('Saving model...')
             torch.save(model.state_dict(), ' RGT_multimodal_{}_seed_{}.pkl'.format(args.task, seed))
             print('Model saved!')
-
     print("Test set results:",
           "epoch= {:}".format(max_epoch),
           "loss= {:.4f}".format(loss_test.item()),
@@ -143,6 +141,14 @@ def main(seed):
           "recall= {:.4f}".format(max_recall),
           "f1_score= {:.4f}".format(max_f1)
           )
+    
+    epochs = list(range(1, len(total_loss) + 1))
+    plt.plot(epochs, total_loss)
+    plt.xlabel('Epoch')
+    plt.ylabel('Training Loss')
+    plt.title('Loss vs Epoch')
+    plt.tight_layout()
+    plt.show()
     return max_acc, max_precision, max_recall, max_f1
 
 if __name__ == "__main__":

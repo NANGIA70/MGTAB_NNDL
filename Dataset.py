@@ -130,8 +130,6 @@ class MGTABlarge(InMemoryDataset):
 
 
     def process(self):
-        # Read data into huge `Data` list.
-
         edge_index0 = torch.load(self.root + "/large_edge_index0.pt")
         edge_index1 = torch.load(self.root + "/large_edge_index1.pt")
         edge_index2 = torch.load(self.root + "/large_edge_index2.pt")
@@ -221,7 +219,7 @@ class MGTABNew(InMemoryDataset):
         profile = torch.load(rd + '/profile_image_feats_10k.pt')
         images  = torch.load(rd + '/image_feats_10k.pt')
 
-        x = torch.cat([prop, tweet, profile], dim=1)
+        x = torch.cat([prop, tweet], dim=1)
 
         # Graph
         edge_index  = torch.load(rd + '/edge_index_10k.pt')
@@ -238,13 +236,12 @@ class MGTABNew(InMemoryDataset):
         data = Data(x=x, edge_index=edge_index)
         data.edge_type   = edge_type
         data.edge_weight = edge_weight
-        data.y1 = label
-        data.y2 = label
         data.y  = label
         data.train_mask = train_mask
         data.val_mask   = val_mask
         data.test_mask  = test_mask
-        data.img        = images
+        data.img        =  torch.cat([profile, images], dim=1)
+
 
         # filters and transform
         data_list = [data]
