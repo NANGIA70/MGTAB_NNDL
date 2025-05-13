@@ -367,7 +367,7 @@ class RGT_multimodal(nn.Module):
     
 class RGT_multimodal_feedforward(nn.Module):
     def __init__(self, args):
-        super(RGT_multimodal, self).__init__()
+        super(RGT_multimodal_feedforward, self).__init__()
         self.dropout = args.dropout
         # Text branch projection
         self.text_proj = nn.Sequential(nn.Linear(args.features_num, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
