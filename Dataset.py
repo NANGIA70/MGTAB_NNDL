@@ -130,8 +130,6 @@ class MGTABlarge(InMemoryDataset):
 
 
     def process(self):
-        # Read data into huge `Data` list.
-
         edge_index0 = torch.load(self.root + "/large_edge_index0.pt")
         edge_index1 = torch.load(self.root + "/large_edge_index1.pt")
         edge_index2 = torch.load(self.root + "/large_edge_index2.pt")
@@ -185,7 +183,7 @@ class MGTABlarge(InMemoryDataset):
         torch.save((data, slices), self.processed_paths[0])
 
 
-class MGTABNan(InMemoryDataset):
+class MGTABNew(InMemoryDataset):
     def __init__(self, root, transform=None, pre_transform=None):
         super().__init__(root, transform, pre_transform)
         self.root = root
@@ -215,114 +213,13 @@ class MGTABNan(InMemoryDataset):
 
     def process(self):
         rd = self.root
-        # ─── NODE FEATURES ───────────────────────────────────────────
-        #  prop: numeric+PCA 20-dim
-        #  tweet: LaBSE 768-dim
-        #  profile: CLIP 768-dim
-        #  images: tweet‐attached CLIP 768-dim (if available)
-        prop    = torch.load(os.path.join(rd,'num_properties_tensor_10k.pt'))
-        tweet   = torch.load(os.path.join(rd,'tweets_tensor_10k.pt'))
-        profile = torch.load(os.path.join(rd,'profile_image_feats_10k.pt'))
-        # this one may not exist until your images_parse_10k.py finishes
-        images_path = os.path.join(rd,'image_feats_10k.pt')
-        if os.path.exists(images_path):
-            images = torch.load(images_path)
-        else:
-            images = None
+        # Node features
+        prop    = torch.load(rd + '/num_properties_tensor_10k.pt')
+        tweet   = torch.load(rd + '/tweets_tensor_10k.pt')
+        profile = torch.load(rd + '/profile_image_feats_10k.pt')
+        images  = torch.load(rd + '/image_feats_10k.pt')
 
-        # 1) Build the GNN input features x by concatenating
-        #    numeric (20d) + text (768d) + profile (768d)
-        x = torch.cat([prop, tweet, profile, images], dim=1)
-        # 2) Expose tweet-image features separately as data.img
-        # data.img = images
-
-        data.x = x.to(torch.float32)
-
-        # Graph
-        edge_index  = torch.load(rd + '/edge_index_10k.pt')
-        edge_type   = torch.load(rd + '/edge_type_10k.pt')
-        edge_weight = torch.load(rd + '/edge_weight_10k.pt')
-
-        # Labels and masks
-        label      = torch.load(rd + '/label_10k.pt')
-        train_mask = torch.load(rd + '/train_mask_10k.pt')
-        val_mask   = torch.load(rd + '/valid_mask_10k.pt')
-        test_mask  = torch.load(rd + '/test_mask_10k.pt')
-
-        # assemble Data
-        data = Data(x=x, edge_index=edge_index)
-        data.edge_type   = edge_type
-        data.edge_weight = edge_weight
-        data.y1 = label
-        data.y2 = label
-        data.y  = label
-        data.train_mask = train_mask
-        data.val_mask   = val_mask
-        data.test_mask  = test_mask
-        data.img        = images
-
-        # filters and transform
-        data_list = [data]
-        if self.pre_filter:
-            data_list = [d for d in data_list if self.pre_filter(d)]
-        if self.pre_transform:
-            data_list = [self.pre_transform(d) for d in data_list]
-
-        data, slices = self.collate(data_list)
-        torch.save((data, slices), self.processed_paths[0])
-
-class TwiBot22(InMemoryDataset):
-    def __init__(self, root, transform=None, pre_transform=None):
-        super().__init__(root, transform, pre_transform)
-        self.root = root
-        self.data, self.slices = torch.load(self.processed_paths[0])
-
-    @property
-    def raw_file_names(self):
-        return [
-            'sample_uids_10k.csv',
-            'node_meta_10k.json',
-            'num_properties_tensor_10k.pt',
-            'tweets_tensor_10k.pt',
-            'profile_image_feats_10k.pt',
-            'image_feats_10k.pt',
-            'edge_index_10k.pt',
-            'edge_type_10k.pt',
-            'edge_weight_10k.pt',
-            'label_10k.pt',
-            'train_mask_10k.pt',
-            'valid_mask_10k.pt',
-            'test_mask_10k.pt',
-        ]
-
-    @property
-    def processed_file_names(self):
-        return ['data.pt']
-
-    def process(self):
-        rd = self.root
-        # ─── NODE FEATURES ───────────────────────────────────────────
-        #  prop: numeric+PCA 20-dim
-        #  tweet: LaBSE 768-dim
-        #  profile: CLIP 768-dim
-        #  images: tweet‐attached CLIP 768-dim (if available)
-        prop    = torch.load(os.path.join(rd,'num_properties_tensor_10k.pt'))
-        tweet   = torch.load(os.path.join(rd,'tweets_tensor_10k.pt'))
-        # profile = torch.load(os.path.join(rd,'profile_image_feats_10k.pt'))
-        # # this one may not exist until your images_parse_10k.py finishes
-        # images_path = os.path.join(rd,'image_feats_10k.pt')
-        # if os.path.exists(images_path):
-        #     images = torch.load(images_path)
-        # else:
-        #     images = None
-
-        # 1) Build the GNN input features x by concatenating
-        #    numeric (20d) + text (768d) + profile (768d)
         x = torch.cat([prop, tweet], dim=1)
-        # 2) Expose tweet-image features separately as data.img
-        # data.img = images
-
-        data.x = x.to(torch.float32)
 
         # Graph
         edge_index  = torch.load(rd + '/edge_index_10k.pt')
@@ -339,13 +236,12 @@ class TwiBot22(InMemoryDataset):
         data = Data(x=x, edge_index=edge_index)
         data.edge_type   = edge_type
         data.edge_weight = edge_weight
-        data.y1 = label
-        data.y2 = label
         data.y  = label
         data.train_mask = train_mask
         data.val_mask   = val_mask
         data.test_mask  = test_mask
-        # data.img        = images
+        data.img        =  torch.cat([profile, images], dim=1)
+
 
         # filters and transform
         data_list = [data]
@@ -356,4 +252,3 @@ class TwiBot22(InMemoryDataset):
 
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
-

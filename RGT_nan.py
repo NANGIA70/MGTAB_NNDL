@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from Dataset import MGTAB, MGTABNew
+from Dataset import MGTAB, MGTABNan
 from models import RGT
 from utils import sample_mask
 import numpy as np
