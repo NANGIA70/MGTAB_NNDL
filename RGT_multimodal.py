@@ -33,9 +33,19 @@ args = parser.parse_args()
 def main(seed):
 
     args.num_edge_type = len(args.relation_select)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset = MGTABNew('./Dataset/MGTAB-new')
-    data = dataset[0]
+
+    # ─── DEVICE ────────────────────────────────────────────────────────────────
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+    print(f"Using device: {device}")
+   
+    dataset = MGTABNew('./Dataset/TwiBot22-as-MGTAB-10k-new')
+    data = dataset[0].to(device)
 
     args.out_dim = 2
 
