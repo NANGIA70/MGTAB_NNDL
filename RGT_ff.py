@@ -9,7 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from Dataset import MGTABNew
+from Dataset import MGTABNew, MGTABAblateImages, MGTABAblateProfile
 from models import RGT_multimodal_feedforward
 from utils import sample_mask
 import numpy as np
@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser(description='RGT_multimodal_feedforward')
 parser.add_argument('--task', type=str, default='bot', help='detection task of stance or bot')
 parser.add_argument('--relation_select', type=int, default=[0,1,2,3,4,5,6], nargs='+', help='selection of relations in the graph (0-6)')
-parser.add_argument('--random_seed', type=int, default=[1], nargs='+', help='selection of random seeds')
+parser.add_argument('--random_seed', type=int, default=[1,2,3,4,5], nargs='+', help='selection of random seeds')
 parser.add_argument('--hidden_dimension', type=int, default=128, help='number of hidden units')
 parser.add_argument("--out_channel", type=int, default=64, help="out channels")
 parser.add_argument('--trans_head', type=int, default=4, help='number of trans_head')
@@ -33,10 +33,11 @@ parser.add_argument('--weight_decay', type=float, default=5e-3, help='weight dec
 parser.add_argument('--threshold', type=float, default=0.5, help='decision threshold for positive class')
 args = parser.parse_args()
 
-def focal_loss(logits, targets, gamma=2.0, alpha=0.25):
-    ce = F.cross_entropy(logits, targets, reduction='none')
-    p_t = torch.exp(-ce)
-    loss = alpha * (1 - p_t)**gamma * ce
+def focal_loss(logits, targets, gamma=2.0, alpha_weight=None):
+    # alpha_weight is your CrossEntropy weight vector
+    ce = F.cross_entropy(logits, targets, weight=alpha_weight, reduction='none')
+    p_t = torch.exp(-ce)                   # prob of the true class
+    loss = (1 - p_t)**gamma * ce           # no extra α, since weight= already did it
     return loss.mean()
 
 def main(seed):
@@ -52,7 +53,7 @@ def main(seed):
     print(f"Using device: {device}")
 
     # ─── DATA ───────────────────────────────────────────────────────────────────
-    dataset = MGTABNew('./Dataset/TwiBot22-as-MGTAB-10k-new')
+    dataset = MGTABAblateProfile('./Dataset/TwiBot22-as-MGTAB-10k-new')
     data = dataset[0].to(device)
 
     # print class balance
@@ -82,7 +83,6 @@ def main(seed):
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
 
-
     # select edge types
     index_select = data.edge_type == 100
     relation_dict = {0:'followers',1:'friends',2:'mention',3:'reply',4:'quoted',5:'url',6:'hashtag'}
@@ -103,7 +103,8 @@ def main(seed):
     def train(epoch):
         model.train()
         logits = model(data.x, edge_index, edge_type, data.img)
-        loss_train = criterion(logits[data.train_mask], data.y[data.train_mask])
+        # loss_train = criterion(logits[data.train_mask], data.y[data.train_mask])
+        loss_train = focal_loss(logits[data.train_mask], data.y[data.train_mask], alpha_weight=pos_weight)
 
         # compute train/val accuracy with argmax
         preds_train = logits.max(1)[1]
@@ -141,9 +142,9 @@ def main(seed):
 
         # 4) metrics
         acc_t  = accuracy_score(y_true, y_pred)
-        prec   = precision_score(y_true, y_pred)
-        rec    = recall_score(y_true, y_pred)
-        f1     = f1_score(y_true, y_pred)
+        prec   = precision_score(y_true, y_pred, average='macro')
+        rec    = recall_score(y_true, y_pred, average='macro')
+        f1     = f1_score(y_true, y_pred, average='macro')
 
         return acc_t, loss_test.item(), prec, rec, f1
 
