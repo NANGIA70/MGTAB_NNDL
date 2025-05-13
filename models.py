@@ -295,7 +295,8 @@ class CrossModalAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, node_feats, img_feats, mask=None):
-        Q = self.proj_q(node_feats).unsqueeze(1)   
+        x1 = self.norm(node_feats)
+        Q = self.proj_q(x1).unsqueeze(1)   
         K = self.proj_k(img_feats).unsqueeze(1) 
         V = self.proj_v(img_feats).unsqueeze(1)
 
@@ -311,6 +312,7 @@ class GatedFusion(nn.Module):
     def __init__(self, dim_node, dim_img):
         super().__init__()
         self.fc = nn.Linear(dim_node + dim_img, 1)
+        nn.init.zeros_(self.fc.bias)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, node_feats, img_feats):
@@ -354,6 +356,41 @@ class RGT_multimodal(nn.Module):
         img_enh  = self.cross_img2node(img_feats, txt_feats)
         # Gated fusion
         h, gate_vals = self.fusion(node_enh, img_enh)
+        # Graph layers
+        h = self.RGT1(h, edge_index, edge_type)
+        h = torch.relu(h)
+        h = self.RGT2(h, edge_index, edge_type)
+        h = torch.relu(h)
+        # Classification head
+        out = self.head(h)
+        return out
+    
+class RGT_multimodal_feedforward(nn.Module):
+    def __init__(self, args):
+        super(RGT_multimodal, self).__init__()
+        self.dropout = args.dropout
+        # Text branch projection
+        self.text_proj = nn.Sequential(nn.Linear(args.features_num, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
+        # Image branch projection
+        self.img_proj = nn.Sequential(nn.Linear(args.img_feat_dim, args.hidden_dimension), nn.LeakyReLU(), nn.Dropout(self.dropout))
+        # Relational graph layers
+        self.RGT1 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
+        self.RGT2 = RGTLayer(num_edge_type=len(args.relation_select), in_channel=args.hidden_dimension, out_channel=args.hidden_dimension, trans_heads=args.trans_head, semantic_head=args.semantic_head, dropout=self.dropout)
+        # Classification head
+        self.head = nn.Sequential( nn.Linear(args.hidden_dimension, args.out_channel), nn.LeakyReLU(), nn.Dropout(self.dropout), nn.Linear(args.out_channel, args.out_dim))
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_uniform_(m.weight)
+                if m.bias is not None:
+                    m.bias.data.zero_()
+
+    def forward(self, features, edge_index, edge_type, img=None):
+        txt_feats = self.text_proj(features)
+        img_feats = self.img_proj(img) if img is not None else torch.zeros_like(txt_feats)
+        h = txt_feats + img_feats
         # Graph layers
         h = self.RGT1(h, edge_index, edge_type)
         h = torch.relu(h)
